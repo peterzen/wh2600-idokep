@@ -203,10 +203,6 @@ func main() {
 	for {
 		doc := fetchDocumentFromPws()
 
-		if debugEnabled {
-			log.Printf("fetched data from PWS\n")
-		}
-
 		if doc != nil {
 			weatherData := parseHtml(doc)
 			if debugEnabled {

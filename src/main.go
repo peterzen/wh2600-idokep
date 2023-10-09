@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,7 +11,6 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 type WeatherData struct {
@@ -57,7 +54,7 @@ func fetchDocumentFromPws() *goquery.Document {
 	}
 	defer resp.Body.Close()
 
-	htmlData, err := ioutil.ReadAll(resp.Body)
+	htmlData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Failed to fetch data from PWS: %s\n", err)
 		return nil
@@ -141,118 +138,49 @@ func parseHtml(doc *goquery.Document) WeatherData {
 	return weatherData
 }
 
-func weatherDataAsJson(wd WeatherData) []byte {
-	// Convert the variables to JSON and print the result
-	jsonData, err := json.Marshal(wd)
+func constructUrl(data WeatherData) string {
+
+	currentTime := time.Now()
+
+	urlVars := []string{
+		fmt.Sprintf("user=%s", os.Getenv("USERNAME")),
+		fmt.Sprintf("pass=%s", os.Getenv("PASSWORD")),
+		fmt.Sprintf("ev=%d", currentTime.Year()),
+		fmt.Sprintf("ho=%d", currentTime.Month()),
+		fmt.Sprintf("nap=%d", currentTime.Day()),
+		fmt.Sprintf("ora=%d", currentTime.Hour()),
+		fmt.Sprintf("perc=%d", currentTime.Minute()),
+		fmt.Sprintf("mp=%d", currentTime.Second()),
+		fmt.Sprintf("hom=%.1f", data.Temperature),
+		fmt.Sprintf("rh=%.0f", data.Humidity),
+		fmt.Sprintf("szelirany=%.0f", data.WindDir),
+		fmt.Sprintf("szelero=%.1f", data.WindSpeed),
+		fmt.Sprintf("szellokes=%.1f", data.WindGust),
+		fmt.Sprintf("p=%.1f", data.PressureRelative),
+		fmt.Sprintf("csap=%.2f", data.PrecipDaily),
+		fmt.Sprintf("csap1h=%.2f", data.PrecipHourlyRate),
+		"tipus=WH2600",
+	}
+
+	return strings.Join(urlVars, "&")
+
+}
+
+func sendToidokep(data WeatherData) error {
+
+	url := fmt.Sprintf("https://pro.idokep.hu/sendws.php?%s", constructUrl(data))
+
+	resp, err := http.Post(url, "application/json", nil)
 	if err != nil {
-		log.Printf("Unable to marshal JSON: %s\n", err)
-		return nil
-	}
-	return jsonData
-}
-
-func calculateHeatIndex(temperature, humidity float64) float64 {
-	// Convert temperature to Fahrenheit
-	temperature = (temperature * 1.8) + 32
-
-	// https://www.wpc.ncep.noaa.gov/html/heatindex_equation.shtml
-	if temperature >= 80 {
-		// Calculate the heat index in Fahrenheit
-		heatIndex := -42.379 + 2.04901523*temperature + 10.14333127*humidity - 0.22475541*temperature*humidity - 6.83783e-3*math.Pow(temperature, 2) - 5.481717e-2*math.Pow(humidity, 2) + 1.22874e-3*math.Pow(temperature, 2)*humidity + 8.5282e-4*temperature*math.Pow(humidity, 2) - 1.99e-6*math.Pow(temperature, 2)*math.Pow(humidity, 2)
-
-		// Convert heat index back to Celsius
-		heatIndex = (heatIndex - 32) * (5.0 / 9.0)
-		return heatIndex
-	}
-	return 0
-}
-
-func windDirToCardinal(windDirDeg int) string {
-	dir := []string{"N ⬇️", "NNE ⬇️", "NE ↙️", "ENE ⬅️", "E ⬅️", "ESE ⬅️", "SE ↖️", "SSE ⬆️", "S ⬆️", "SSW ⬆️", "SW ↗️", "WSW ➡️", "W ➡️", "WNW ➡️", "NW ↘️", "NNW ⬇️"}
-	wind := windDirDeg % 360
-	winddiroffset := (float64(wind) + (360.0 / 32.0)) / 360.0
-	winddiridx := int(math.Floor(winddiroffset / (1.0 / 16.0)))
-
-	if winddiridx >= len(dir) {
-		if debugEnabled {
-			log.Printf("windDirToCardinal calculated invalid index %d (deg: %d)\n", winddiridx, windDirDeg)
-		}
-		return ""
-	}
-	winddir := dir[winddiridx]
-	return winddir
-}
-
-func dateToUnixTimestamp(dateStr string) (int64, error) {
-	layout := "15:04 1/2/2006" // day and month are swapped compared to the US format
-	location, err := time.LoadLocation("CET")
-	if err != nil {
-		return 0, err
-	}
-	t, err := time.ParseInLocation(layout, dateStr, location)
-	if err != nil {
-		if debugEnabled {
-			log.Printf("Cannot convert date from '%s': %s\n", dateStr, err)
-		}
-		return 0, err
-	}
-	return t.Unix(), nil
-}
-func calculateWindChill(windSpeed float64, temp float64) float64 {
-	// Calculate the wind chill temperature in Celsius using the National Weather Service's formula
-	// where T is the air temperature in Celsius and V is the wind speed in km/h
-
-	// A Wind Chill value cannot be calculated for wind speeds less than 4.8 kilometers/hour
-	if windSpeed < 4.8 {
-		return temp
+		fmt.Printf("Error posting: %s", err)
+		return err
 	}
 
-	V := windSpeed / 1.609344 // convert wind speed to miles per hour
-	T := temp*1.8 + 32        // convert temperature to Fahrenheit
-	WCI := 35.74 + 0.6215*T - 35.75*math.Pow(V, 0.16) + 0.4275*T*math.Pow(V, 0.16)
-	windChill := (WCI - 32) * 5 / 9 // convert wind chill to Celsius
-	return windChill
-}
-
-func calculateDewPoint(tempCelsius, humidity float64) float64 {
-	a := 17.27
-	b := 237.7
-	alpha := ((a * tempCelsius) / (b + tempCelsius)) + math.Log(humidity/100.0)
-	dewPointCelsius := (b * alpha) / (a - alpha)
-	return dewPointCelsius
-}
-
-func addCalculatedData(wd WeatherData) WeatherData {
-	heatIndex := calculateHeatIndex(wd.Temperature, wd.Humidity)
-	wd.HeatIndex = roundFloatTo1Decimal(heatIndex)
-
-	windDirCardinal := windDirToCardinal(int(wd.WindDir))
-	wd.WindDirCardinal = windDirCardinal
-
-	windChill := calculateWindChill(wd.WindSpeed, wd.Temperature)
-	wd.WindChill = roundFloatTo1Decimal(windChill)
-
-	dewPoint := calculateDewPoint(wd.Temperature, wd.Humidity)
-	wd.DewPoint = roundFloatTo1Decimal(dewPoint)
-
-	recTs, err := dateToUnixTimestamp(wd.ReceiverTime)
-	if err == nil {
-		wd.ReceiverTimestamp = recTs
-	}
-	return wd
-}
-
-func roundFloatTo1Decimal(f float64) float64 {
-	return math.Round(f*10) / 10
+	fmt.Printf("Success %#v", resp.Status)
+	return nil
 }
 
 func main() {
-
-	debugEnabled = false
-
-	if os.Getenv("DEBUG_ENABLED") == "true" {
-		debugEnabled = true
-	}
 
 	pwsIp = os.Getenv("PWS_IP")
 	if pwsIp == "" {
@@ -268,67 +196,13 @@ func main() {
 		log.Fatalf("Invalid FETCH_INTERVAL value: %s\n", fetchIntervalStr)
 	}
 
-	// Get MQTT connection parameters from environment variables
-	mqttBroker := os.Getenv("MQTT_HOST")
-	if mqttBroker == "" {
-		log.Fatalf("MQTT_HOST not configured\n")
-	}
-	mqttPort := os.Getenv("MQTT_PORT")
-	if mqttPort == "" {
-		mqttPort = "1883"
-	}
-	mqttUser := os.Getenv("MQTT_USER")
-	if mqttUser == "" {
-		log.Fatalf("MQTT_USER not configured\n")
-	}
-	mqttPassword := os.Getenv("MQTT_PASSWORD")
-
-	mqttClientId := os.Getenv("MQTT_CLIENT_ID")
-	if mqttClientId == "" {
-		mqttClientId = "pwsmqttdispatcher"
-	}
-	// Set up MQTT client options
-	mqttConnUri := fmt.Sprintf("tcp://%s:%s", mqttBroker, mqttPort)
-	opts := mqtt.NewClientOptions().AddBroker(mqttConnUri)
-	opts.SetClientID(mqttClientId)
-	opts.SetUsername(mqttUser)
-	opts.SetPassword(mqttPassword)
-
-	// Create MQTT client
-	client := mqtt.NewClient(opts)
-
-	// Connect to MQTT broker
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		// panic(token.Error())
-		log.Fatalf("Cannot connect to MQTT broker: %s\n", token.Error())
-	}
-	defer client.Disconnect(250)
-
-	log.Printf("Connected to MQTT broker %s\n", opts.Servers[0])
-
-	mqttTopic := os.Getenv(("MQTT_TOPIC"))
-	if mqttTopic == "" {
-		mqttTopic = "personal_weather_station"
-	}
-	log.Printf("Publishing to MQTT topic %s\n", mqttTopic)
-
 	for {
 		doc := fetchDocumentFromPws()
 
 		if doc != nil {
 			weatherData := parseHtml(doc)
-			weatherData = addCalculatedData(weatherData)
-			weatherDataJson := weatherDataAsJson(weatherData)
-			if weatherDataJson != nil {
-				token := client.Publish(mqttTopic, 0, false, weatherDataJson)
-				if debugEnabled {
-					log.Printf("Published data to #%s\n", mqttTopic)
-				}
-				token.Wait()
-				if debugEnabled {
-					log.Println(string(weatherDataJson))
-				}
-			}
+			fmt.Printf("%#v", weatherData)
+			sendToidokep(weatherData)
 		}
 		time.Sleep(time.Duration(fetchInterval) * time.Second)
 	}

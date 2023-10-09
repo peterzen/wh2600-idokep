@@ -4,7 +4,8 @@ services:
   pws-idokep-dispatcher:
     image: peterzen/pws-idokep-dispatcher
     environment:
-      - PWS_IP=10.10.10.10
-      - USERNAME=idokep_user
+      - USERNAME=idokep_username
       - PASSWORD=idokep_pass
+      - PWS_IP=10.10.10.10
+      - FETCH_INTERVAL=300
     restart: unless-stopped

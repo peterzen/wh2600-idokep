@@ -172,15 +172,19 @@ func sendToidokep(data WeatherData) error {
 
 	resp, err := http.Post(url, "application/json", nil)
 	if err != nil {
-		fmt.Printf("Error posting: %s", err)
+		log.Printf("Error posting: %s\n", err)
 		return err
 	}
 
-	fmt.Printf("Success %#v", resp.Status)
+	if debugEnabled {
+		log.Printf("Success %#v\n", resp.Status)
+	}
 	return nil
 }
 
 func main() {
+
+	debugEnabled = os.Getenv("DEBUG_ENABLED") != ""
 
 	pwsIp = os.Getenv("PWS_IP")
 	if pwsIp == "" {
@@ -199,9 +203,15 @@ func main() {
 	for {
 		doc := fetchDocumentFromPws()
 
+		if debugEnabled {
+			log.Printf("fetched data from PWS\n")
+		}
+
 		if doc != nil {
 			weatherData := parseHtml(doc)
-			fmt.Printf("%#v", weatherData)
+			if debugEnabled {
+				log.Printf("%#v\n", weatherData)
+			}
 			sendToidokep(weatherData)
 		}
 		time.Sleep(time.Duration(fetchInterval) * time.Second)

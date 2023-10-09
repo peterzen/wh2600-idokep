@@ -4,6 +4,7 @@ services:
   pws-idokep-dispatcher:
     image: peterzen/pws-idokep-dispatcher
     environment:
+      - DEBUG_ENABLED=true
       - USERNAME=idokep_username
       - PASSWORD=idokep_pass
       - PWS_IP=10.10.10.10

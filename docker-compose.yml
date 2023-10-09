@@ -1,0 +1,10 @@
+---
+version: "3"
+services:
+  pws-idokep-dispatcher:
+    image: peterzen/pws-idokep-dispatcher
+    environment:
+      - PWS_IP=10.10.10.10
+      - USERNAME=idokep_user
+      - PASSWORD=idokep_pass
+    restart: unless-stopped

@@ -170,6 +170,10 @@ func sendToidokep(data WeatherData) error {
 
 	url := fmt.Sprintf("https://pro.idokep.hu/sendws.php?%s", constructUrl(data))
 
+	if debugEnabled {
+		log.Printf("%s\n", url)
+	}
+
 	resp, err := http.Post(url, "application/json", nil)
 	if err != nil {
 		log.Printf("Error posting: %s\n", err)
